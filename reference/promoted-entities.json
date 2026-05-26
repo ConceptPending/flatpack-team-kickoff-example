@@ -1,0 +1,45 @@
+{
+  "$comment": "Entities the promotion plan introduced beyond the Flatpack's manifest. Format documented at github.com/ConceptPending/baseplate/blob/main/docs/promoting-a-flatpack.md step 2. The verifier reads this alongside original-flatpack.html.",
+  "entities": [
+    {
+      "name": "ChecklistTemplate",
+      "source": "code-inferred",
+      "fields": [
+        { "name": "name",          "type": "string", "required": true },
+        { "name": "version",       "type": "integer", "required": true },
+        { "name": "is_active",     "type": "boolean", "required": true, "default": true },
+        { "name": "created_by_id", "type": "uuid",   "required": true }
+      ]
+    },
+    {
+      "name": "ChecklistRun",
+      "source": "interview-required",
+      "fields": [
+        { "name": "template_id",      "type": "uuid",     "required": true },
+        { "name": "template_version", "type": "integer",  "required": true },
+        { "name": "owner_id",         "type": "uuid",     "required": true },
+        { "name": "project_handle",   "type": "string",   "required": true },
+        {
+          "name": "status",
+          "type": "enum",
+          "values": ["in_progress", "completed", "abandoned"],
+          "default": "in_progress"
+        },
+        { "name": "started_at",       "type": "datetime", "required": true },
+        { "name": "completed_at",     "type": "datetime" }
+      ]
+    },
+    {
+      "name": "ChecklistProgress",
+      "source": "code-inferred",
+      "fields": [
+        { "name": "run_id",     "type": "uuid",     "required": true },
+        { "name": "item_id",    "type": "string",   "required": true },
+        { "name": "done",       "type": "boolean",  "required": true, "default": false },
+        { "name": "note",       "type": "text" },
+        { "name": "done_by_id", "type": "uuid" },
+        { "name": "done_at",    "type": "datetime" }
+      ]
+    }
+  ]
+}

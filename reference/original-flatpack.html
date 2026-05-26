@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flatpack: Checklist template</title>
+<!-- FLATPACK:HELP
+
+  Flatpack:     Checklist template
+  Version:      0.1.0
+  Purpose:      Sectioned checklist with progress, notes, local save, and a printable report.
+  Data:         local-only
+  Network:      none
+  Persistence:  localStorage
+
+  HUMAN HELP
+    Inputs:   the checklist items defined in the SCHEMA block, plus the
+              user's tick state and free-text notes
+    Outputs:  progress bar, exported Markdown / JSON, printable report
+              including notes
+    Limits:   single-user; no per-user sign-off or attribution; new items
+              added to the schema show as untouched (missing-item migration
+              is automatic)
+
+  AI EDITING NOTES
+    - Safe to modify:  SCHEMA (the checklist itself), STYLES, RENDERING.
+    - Edit with care:  STATE — bump STORAGE_KEY or write a migration if
+                       the entry shape changes.
+    - Avoid modifying: IMPORT_EXPORT unless changing file formats.
+    - Rules: no network, no external dependencies, no embedded secrets.
+    - Run TEST_CASES (?test=1) after changes to CORE_LOGIC or VALIDATION.
+-->
+
+<!-- FLATPACK:STYLES -->
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #fff; --ink: #1b1b1a; --muted: #6a6a66;
+    --line: #e5e5e0; --accent: #2b6cb0; --accent-ink: #fff; --ok: #166534;
+    --radius: 8px; --gap: 16px; --maxw: 820px;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); line-height: 1.45; }
+  main, header, footer { max-width: var(--maxw); margin: 0 auto; padding: 24px; }
+  header { padding-bottom: 0; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  h3 { font-size: 0.95rem; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .muted { color: var(--muted); }
+  .privacy { background: #eef4fb; border: 1px solid #cfe0f3; color: #1e3a5f;
+    padding: 10px 12px; border-radius: var(--radius); font-size: 0.9rem; margin: 16px 0 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; margin-bottom: var(--gap); }
+  .btn { appearance: none; border: 1px solid var(--line); background: #fff; color: var(--ink); padding: 8px 14px; border-radius: var(--radius); font: inherit; cursor: pointer; }
+  .btn:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn + .btn { margin-left: 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+  .progress { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
+  .progress > div { height: 100%; background: var(--ok); transition: width 0.2s; }
+  .progress-label { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem; }
+
+  ul.items { list-style: none; padding: 0; margin: 0; }
+  li.item { padding: 10px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; }
+  li.item:last-child { border-bottom: none; }
+  li.item input[type="checkbox"] { width: 18px; height: 18px; margin-top: 4px; }
+  li.item.done .text { text-decoration: line-through; color: var(--muted); }
+  .text { font-weight: 500; }
+  .why { color: var(--muted); font-size: 0.9rem; margin-top: 4px; }
+  .note { margin-top: 6px; width: 100%; min-height: 38px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius); font: inherit; resize: vertical; }
+
+  footer { color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); margin-top: 24px; }
+
+  .print-only { display: none; }
+
+  @media print {
+    body { background: #fff; color: #000; }
+    .no-print { display: none !important; }
+    .print-only { display: block !important; }
+    main { max-width: none; padding: 0; }
+    .card { box-shadow: none; border: 1px solid #ccc; page-break-inside: avoid; }
+    .progress { display: none; }
+    li.item { grid-template-columns: 18px 1fr; }
+  }
+</style>
+
+<!-- FLATPACK:HTML -->
+</head>
+<body>
+<header>
+  <h1 id="app-title">Checklist</h1>
+  <p class="muted" id="app-purpose">A sectioned checklist with progress, notes, local save, and a printable report.</p>
+  <div class="privacy" id="privacy-banner" role="note">Local-first: progress is saved on this device. Nothing is uploaded.</div>
+</header>
+
+<main>
+  <section class="card no-print">
+    <div class="progress-label">
+      <strong>Progress</strong>
+      <span id="progress-text">0 / 0</span>
+    </div>
+    <div class="progress" aria-hidden="true"><div id="progress-bar" style="width:0%"></div></div>
+    <div class="row" style="margin-top:12px;">
+      <button class="btn primary" type="button" id="print-btn">Print report</button>
+      <button class="btn" type="button" id="export-md-btn">Export Markdown</button>
+      <button class="btn" type="button" id="export-json-btn">Export JSON</button>
+      <button class="btn" type="button" id="reset-btn">Reset</button>
+    </div>
+  </section>
+
+  <div id="sections"></div>
+</main>
+
+<footer>
+  <span id="footer-version"></span> · Local-only · No network · Single file
+</footer>
+
+<!-- FLATPACK:MANIFEST -->
+<script type="application/json" id="flatpack-manifest">
+{
+  "name": "Project kickoff checklist",
+  "artifactType": "checklist",
+  "version": "0.1.0",
+  "scope": "personal",
+  "persistence": "localStorage",
+  "network": "none",
+  "entities": [
+    {
+      "name": "ChecklistSection",
+      "fields": [
+        { "name": "id",    "type": "string", "required": true, "unique": true },
+        { "name": "title", "type": "string", "required": true }
+      ]
+    },
+    {
+      "name": "ChecklistItem",
+      "fields": [
+        { "name": "id",        "type": "string", "required": true, "unique": true },
+        { "name": "sectionId", "type": "string", "required": true, "ref": "ChecklistSection.id" },
+        { "name": "text",      "type": "string", "required": true },
+        { "name": "why",       "type": "string", "required": false },
+        { "name": "done",      "type": "boolean", "default": false },
+        { "name": "note",      "type": "string", "required": false }
+      ]
+    }
+  ],
+  "validations": [
+    "every item belongs to exactly one section",
+    "item ids are stable across edits (used as state keys)",
+    "done flag is per item; progress is derived"
+  ],
+  "validation_predicates": [
+    { "field": "id",        "constraint": "required",
+      "description": "section and item ids are required and used as state keys" },
+    { "field": "title",     "constraint": "required",
+      "description": "every section has a title" },
+    { "field": "text",      "constraint": "required",
+      "description": "every item has text" },
+    { "field": "sectionId", "constraint": "required",
+      "description": "every item belongs to exactly one section" }
+  ],
+  "exports": ["markdown", "json", "print_pdf"],
+  "promotionSignals": [
+    "Multiple people work the same checklist at the same time",
+    "Checklist progress must be tracked across many projects or matters",
+    "Per-user attribution or sign-off is required",
+    "Templates need to be edited centrally and rolled out to teams"
+  ],
+  "archetype": "workflow-with-checklist"
+}
+</script>
+
+<!-- FLATPACK:METADATA + everything else -->
+<script>
+"use strict";
+
+const APP_META = {
+  name: "Project kickoff checklist",
+  version: "0.1.0",
+  description: "A sectioned checklist with progress, notes, local save, and a printable report.",
+  dataPolicy: "local-only",
+  persistence: "localStorage",
+  network: "none"
+};
+const STORAGE_KEY = "flatpack:checklist:v1";
+
+/* FLATPACK:SCHEMA — replace the sections to suit. Each item needs a stable id. */
+const checklist = [
+  {
+    id: "scope",
+    title: "Scope",
+    items: [
+      { id: "scope-1", text: "Goal stated in one sentence", why: "Anchors every later decision." },
+      { id: "scope-2", text: "Non-goals listed", why: "Saves arguments later." },
+      { id: "scope-3", text: "Definition of done agreed", why: "Tells you when to stop." }
+    ]
+  },
+  {
+    id: "people",
+    title: "People",
+    items: [
+      { id: "people-1", text: "Owner identified", why: "Single accountable person." },
+      { id: "people-2", text: "Reviewers identified", why: "Knowing in advance avoids drift." },
+      { id: "people-3", text: "Stakeholders informed", why: "Surprise is a project killer." }
+    ]
+  },
+  {
+    id: "risks",
+    title: "Risks",
+    items: [
+      { id: "risks-1", text: "Top 3 risks named", why: "If you can't name three, look harder." },
+      { id: "risks-2", text: "Mitigation for each risk", why: "Naming a risk without a plan is hand-waving." }
+    ]
+  },
+  {
+    id: "cadence",
+    title: "Cadence",
+    items: [
+      { id: "cadence-1", text: "Standing review slot booked" },
+      { id: "cadence-2", text: "Communication channel chosen" }
+    ]
+  }
+];
+
+/* FLATPACK:STATE */
+function blankProgress() {
+  const out = {};
+  for (const s of checklist) for (const it of s.items) out[it.id] = { done: false, note: "" };
+  return out;
+}
+const initialState = { progress: blankProgress() };
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.progress) return null;
+    // Migrate: add any new items defined in checklist but missing from storage.
+    const merged = { progress: blankProgress() };
+    for (const k of Object.keys(merged.progress)) {
+      if (parsed.progress[k]) merged.progress[k] = parsed.progress[k];
+    }
+    return merged;
+  } catch { return null; }
+}
+function saveState() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {} }
+let state = loadState() ?? structuredClone(initialState);
+
+/* FLATPACK:VALIDATION */
+function validate(progress, list) {
+  const errs = [];
+  const validIds = new Set();
+  for (const s of list) for (const it of s.items) validIds.add(it.id);
+  for (const [id, entry] of Object.entries(progress || {})) {
+    if (!validIds.has(id)) continue;  // unknown ids are dropped by migration, not an error
+    if (entry == null || typeof entry !== "object") {
+      errs.push({ field: id, message: "entry must be an object" });
+      continue;
+    }
+    if (typeof entry.done !== "boolean") errs.push({ field: id, message: "done must be a boolean" });
+    if (entry.note !== undefined && typeof entry.note !== "string") errs.push({ field: id, message: "note must be a string" });
+  }
+  return errs;
+}
+
+/* FLATPACK:CORE_LOGIC — pure */
+function computeProgress(progress, list) {
+  let total = 0, done = 0;
+  for (const s of list) for (const it of s.items) {
+    total++;
+    if (progress[it.id] && progress[it.id].done) done++;
+  }
+  return { total, done, pct: total === 0 ? 0 : Math.round((done / total) * 100) };
+}
+function toMarkdown(meta, list, progress) {
+  const { done, total, pct } = computeProgress(progress, list);
+  const lines = [];
+  lines.push(`# ${meta.name}`);
+  lines.push(`_${new Date().toLocaleString()} · ${done}/${total} (${pct}%)_`);
+  lines.push("");
+  for (const s of list) {
+    lines.push(`## ${s.title}`);
+    for (const it of s.items) {
+      const p = progress[it.id] || { done: false, note: "" };
+      lines.push(`- [${p.done ? "x" : " "}] ${it.text}`);
+      if (p.note && p.note.trim()) {
+        lines.push(`  - ${p.note.replace(/\n+/g, " ")}`);
+      }
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+/* FLATPACK:IMPORT_EXPORT */
+function triggerDownload(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+function exportMarkdown() {
+  const text = toMarkdown(APP_META, checklist, state.progress);
+  triggerDownload(new Blob([text], { type: "text/markdown;charset=utf-8" }), `${slug(APP_META.name)}.md`);
+}
+function exportJSON() {
+  triggerDownload(
+    new Blob([JSON.stringify({ meta: APP_META, state }, null, 2)], { type: "application/json" }),
+    `${slug(APP_META.name)}.json`
+  );
+}
+function resetAll() { state = structuredClone(initialState); saveState(); }
+function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
+
+/* FLATPACK:RENDERING */
+const $ = s => document.querySelector(s);
+function renderHeader() {
+  $("#app-title").textContent = APP_META.name;
+  $("#app-purpose").textContent = APP_META.description;
+  $("#footer-version").textContent = `${APP_META.name} v${APP_META.version}`;
+}
+function renderSections() {
+  const root = $("#sections");
+  root.innerHTML = checklist.map(s => `
+    <section class="card" aria-labelledby="sec-${s.id}">
+      <h3 id="sec-${s.id}">${escapeHtml(s.title)}</h3>
+      <ul class="items">
+        ${s.items.map(it => {
+          const p = state.progress[it.id] || { done: false, note: "" };
+          return `
+            <li class="item ${p.done ? "done" : ""}">
+              <input type="checkbox" id="chk-${it.id}" data-item-id="${it.id}" ${p.done ? "checked" : ""} aria-label="${escapeAttr(it.text)}">
+              <div>
+                <label class="text" for="chk-${it.id}">${escapeHtml(it.text)}</label>
+                ${it.why ? `<div class="why">${escapeHtml(it.why)}</div>` : ""}
+                <textarea class="note no-print" data-note-id="${it.id}" placeholder="Notes (optional)">${escapeHtml(p.note || "")}</textarea>
+                ${p.note ? `<div class="why print-only">${escapeHtml(p.note)}</div>` : ""}
+              </div>
+            </li>`;
+        }).join("")}
+      </ul>
+    </section>
+  `).join("");
+}
+function renderProgress() {
+  const { done, total, pct } = computeProgress(state.progress, checklist);
+  $("#progress-text").textContent = `${done} / ${total} (${pct}%)`;
+  $("#progress-bar").style.width = `${pct}%`;
+}
+function render() { renderHeader(); renderSections(); renderProgress(); saveState(); }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function escapeAttr(s) { return escapeHtml(s); }
+
+/* FLATPACK:EVENTS */
+function bindEvents() {
+  document.addEventListener("change", e => {
+    const t = e.target;
+    if (!t) return;
+    if (t.dataset.itemId) {
+      const id = t.dataset.itemId;
+      state.progress[id] = state.progress[id] || { done: false, note: "" };
+      state.progress[id].done = !!t.checked;
+      renderProgress();
+      saveState();
+      t.closest("li").classList.toggle("done", state.progress[id].done);
+    }
+  });
+  document.addEventListener("input", e => {
+    const t = e.target;
+    if (t && t.dataset && t.dataset.noteId) {
+      const id = t.dataset.noteId;
+      state.progress[id] = state.progress[id] || { done: false, note: "" };
+      state.progress[id].note = t.value;
+      saveState();
+    }
+  });
+  $("#print-btn").addEventListener("click", () => window.print());
+  $("#export-md-btn").addEventListener("click", exportMarkdown);
+  $("#export-json-btn").addEventListener("click", exportJSON);
+  $("#reset-btn").addEventListener("click", () => {
+    if (!confirm("Clear all progress and notes?")) return;
+    resetAll(); render();
+  });
+}
+
+/* FLATPACK:TEST_CASES */
+const TEST_CASES = [
+  {
+    name: "computeProgress counts done items",
+    run: () => {
+      const p = blankProgress();
+      const firstId = checklist[0].items[0].id;
+      p[firstId].done = true;
+      const r = computeProgress(p, checklist);
+      return r.done === 1 && r.total >= 1;
+    }
+  },
+  {
+    name: "toMarkdown includes section titles",
+    run: () => {
+      const md = toMarkdown(APP_META, checklist, blankProgress());
+      return md.includes(`## ${checklist[0].title}`);
+    }
+  },
+  {
+    name: "toMarkdown checks items that are marked done",
+    run: () => {
+      const p = blankProgress();
+      const id = checklist[0].items[0].id;
+      p[id].done = true;
+      const md = toMarkdown(APP_META, checklist, p);
+      return md.includes(`- [x] ${checklist[0].items[0].text}`);
+    }
+  },
+  {
+    name: "bindEvents attaches listeners without throwing",
+    run: () => {
+      const realQS = document.querySelector;
+      const realAEL = document.addEventListener;
+      let attached = 0;
+      const mockEl = {
+        addEventListener: () => { attached++; },
+        classList: { add(){}, remove(){}, toggle(){} },
+        style: {}, dataset: {}, hidden: false, value: "", checked: false, textContent: ""
+      };
+      document.querySelector = () => mockEl;
+      document.addEventListener = () => { attached++; };
+      try { bindEvents(); return attached > 0; }
+      finally {
+        document.querySelector = realQS;
+        document.addEventListener = realAEL;
+      }
+    }
+  },
+  {
+    name: "loadState tolerates malformed stored data",
+    run: () => {
+      // Portable across Chromium / Firefox / WebKit: set a real malformed
+      // value rather than shadowing localStorage.getItem (which Firefox and
+      // WebKit don't allow you to overwrite on the Storage instance).
+      const prior = localStorage.getItem(STORAGE_KEY);
+      try {
+        localStorage.setItem(STORAGE_KEY, "not valid json {{{");
+        return loadState() === null;
+      } finally {
+        if (prior === null) localStorage.removeItem(STORAGE_KEY);
+        else localStorage.setItem(STORAGE_KEY, prior);
+      }
+    }
+  }
+];
+function runTests() {
+  const results = TEST_CASES.map(t => {
+    try { return { name: t.name, passed: !!t.run() }; }
+    catch (e) { return { name: t.name, passed: false, error: String(e) }; }
+  });
+  // eslint-disable-next-line no-console
+  console.table(results);
+  return results;
+}
+
+/* FLATPACK:BOOT */
+document.addEventListener("DOMContentLoaded", () => {
+  bindEvents();
+  render();
+  if (new URLSearchParams(location.search).get("test") === "1") runTests();
+});
+</script>
+</body>
+</html>
